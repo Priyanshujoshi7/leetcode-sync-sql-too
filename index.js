@@ -7,7 +7,8 @@ const TEST_MODE = process.argv.includes("test");
 
 async function main() {
   let githubToken, owner, repo, leetcodeCSRFToken, leetcodeSession;
-  let filterDuplicateSecs, destinationFolder;
+  let filterDuplicateSecs, destinationFolder, syncFrom, language;
+
   if (TEST_MODE) {
     if (
       !config.GITHUB_TOKEN ||
@@ -19,13 +20,16 @@ async function main() {
         "Missing required configuration in src/test_config.js needed to run the test",
       );
     }
+
     githubToken = config.GITHUB_TOKEN;
     [owner, repo] = config.GITHUB_REPO.split("/");
     leetcodeCSRFToken = config.LEETCODE_CSRF_TOKEN;
     leetcodeSession = config.LEETCODE_SESSION;
     filterDuplicateSecs = config.FILTER_DUPLICATE_SECS;
     destinationFolder = config.DESTINATION_FOLDER;
-    verbose = config.VERBOSE.toString(); // Convert to string to match core.getInput('verbose') return type
+    syncFrom = "";
+    language = "";
+    verbose = config.VERBOSE.toString();
     commitHeader = config.COMMIT_HEADER;
   } else {
     githubToken = core.getInput("github-token");
@@ -35,6 +39,8 @@ async function main() {
     leetcodeSession = core.getInput("leetcode-session");
     filterDuplicateSecs = core.getInput("filter-duplicate-secs");
     destinationFolder = core.getInput("destination-folder");
+    syncFrom = core.getInput("sync-from");
+    language = core.getInput("language");
     verbose = core.getInput("verbose");
     commitHeader = core.getInput("commit-header");
   }
@@ -47,6 +53,8 @@ async function main() {
     leetcodeSession,
     filterDuplicateSecs,
     destinationFolder,
+    syncFrom,
+    language,
     verbose,
     commitHeader,
   });

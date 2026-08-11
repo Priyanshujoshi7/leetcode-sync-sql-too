@@ -14619,7 +14619,7 @@ async function getInfo(submission, session, csrfToken) {
     }
   };
 
-  info = await getInfo();
+  const info = await getInfo();
   return { ...submission, ...info };
 }
 
@@ -14647,6 +14647,9 @@ async function commit(params) {
 
   const prefix = !!destinationFolder ? destinationFolder : "";
   const commitName = !!commitHeader ? commitHeader : COMMIT_MESSAGE;
+
+  let message;
+  let qid;
 
   if ("runtimePerc" in submission) {
     message = `${commitName} - ${submission.title} - Runtime - ${submission.runtime} (${submission.runtimePerc}), Memory - ${submission.memory} (${submission.memoryPerc})`;
@@ -14747,6 +14750,7 @@ async function getQuestionData(titleSlug, leetcodeSession, csrfToken) {
 }
 
 // Returns false if no more submissions should be added.
+
 function addToSubmissions(params) {
   const {
     response,
@@ -14754,31 +14758,46 @@ function addToSubmissions(params) {
     filterDuplicateSecs,
     submissions_dict,
     submissions,
+    language,
   } = params;
 
   for (const submission of response.data.data.submissionList.submissions) {
-    submissionTimestamp = Number(submission.timestamp);
+    const submissionTimestamp = Number(submission.timestamp);
+
     if (submissionTimestamp <= lastTimestamp) {
       return false;
     }
+
     if (submission.statusDisplay !== "Accepted") {
       continue;
     }
+
+    // If a language filter was provided, only keep submissions
+    // written in that language.
+    if (language && submission.lang !== language) {
+      continue;
+    }
+
     const name = normalizeName(submission.title);
     const lang = submission.lang;
+
     if (!submissions_dict[name]) {
       submissions_dict[name] = {};
     }
-    // Filter out other accepted solutions less than one day from the most recent one.
+
+    // Filter out other accepted solutions less than one day
+    // from the most recent one.
     if (
       submissions_dict[name][lang] &&
       submissions_dict[name][lang] - submissionTimestamp < filterDuplicateSecs
     ) {
       continue;
     }
+
     submissions_dict[name][lang] = submissionTimestamp;
     submissions.push(submission);
   }
+
   return true;
 }
 
@@ -14791,6 +14810,8 @@ async function sync(inputs) {
     leetcodeSession,
     filterDuplicateSecs,
     destinationFolder,
+    syncFrom,
+    language,
     verbose,
     commitHeader,
   } = inputs;
@@ -14799,6 +14820,13 @@ async function sync(inputs) {
     auth: githubToken,
     userAgent: "LeetCode sync to GitHub - GitHub Action",
   });
+  if (syncFrom) {
+    log(`Historical sync enabled from: ${syncFrom}`);
+  }
+
+  if (language) {
+    log(`Language filter enabled: ${language}`);
+  }
   // First, get the time the timestamp for when the syncer last ran.
   const commits = await octokit.repos.listCommits({
     owner: owner,
@@ -14807,10 +14835,15 @@ async function sync(inputs) {
   });
 
   let lastTimestamp = 0;
+
+  if (syncFrom) {
+    lastTimestamp = Math.floor(new Date(syncFrom).getTime() / 1000);
+  }
   // commitInfo is used to get the original name / email to use for the author / committer.
   // Since we need to modify the commit time, we can't use the default settings for the
   // authenticated user.
-  let commitInfo = commits.data[commits.data.length - 1].commit.author;
+  let commitInfo;
+
   for (const commit of commits.data) {
     if (
       !commit.commit.message.startsWith(
@@ -14819,8 +14852,13 @@ async function sync(inputs) {
     ) {
       continue;
     }
+
     commitInfo = commit.commit.author;
-    lastTimestamp = Date.parse(commit.commit.committer.date) / 1000;
+
+    if (!syncFrom) {
+      lastTimestamp = Date.parse(commit.commit.committer.date) / 1000;
+    }
+
     break;
   }
 
@@ -14895,6 +14933,7 @@ async function sync(inputs) {
         filterDuplicateSecs,
         submissions_dict,
         submissions,
+        language,
       })
     ) {
       break;
@@ -14916,8 +14955,8 @@ async function sync(inputs) {
   log(`Syncing ${submissions.length} submissions...`);
   let latestCommitSHA = commits.data[0].sha;
   let treeSHA = commits.data[0].commit.tree.sha;
-  for (i = submissions.length - 1; i >= 0; i--) {
-    submission = await getInfo(
+  for (let i = submissions.length - 1; i >= 0; i--) {
+    const submission = await getInfo(
       submissions[i],
       leetcodeSession,
       leetcodeCSRFToken
@@ -19556,7 +19595,8 @@ const TEST_MODE = process.argv.includes("test");
 
 async function main() {
   let githubToken, owner, repo, leetcodeCSRFToken, leetcodeSession;
-  let filterDuplicateSecs, destinationFolder;
+  let filterDuplicateSecs, destinationFolder, syncFrom, language;
+
   if (TEST_MODE) {
     if (
       !config.GITHUB_TOKEN ||
@@ -19568,13 +19608,16 @@ async function main() {
         "Missing required configuration in src/test_config.js needed to run the test",
       );
     }
+
     githubToken = config.GITHUB_TOKEN;
     [owner, repo] = config.GITHUB_REPO.split("/");
     leetcodeCSRFToken = config.LEETCODE_CSRF_TOKEN;
     leetcodeSession = config.LEETCODE_SESSION;
     filterDuplicateSecs = config.FILTER_DUPLICATE_SECS;
     destinationFolder = config.DESTINATION_FOLDER;
-    verbose = config.VERBOSE.toString(); // Convert to string to match core.getInput('verbose') return type
+    syncFrom = "";
+    language = "";
+    verbose = config.VERBOSE.toString();
     commitHeader = config.COMMIT_HEADER;
   } else {
     githubToken = core.getInput("github-token");
@@ -19584,6 +19627,8 @@ async function main() {
     leetcodeSession = core.getInput("leetcode-session");
     filterDuplicateSecs = core.getInput("filter-duplicate-secs");
     destinationFolder = core.getInput("destination-folder");
+    syncFrom = core.getInput("sync-from");
+    language = core.getInput("language");
     verbose = core.getInput("verbose");
     commitHeader = core.getInput("commit-header");
   }
@@ -19596,6 +19641,8 @@ async function main() {
     leetcodeSession,
     filterDuplicateSecs,
     destinationFolder,
+    syncFrom,
+    language,
     verbose,
     commitHeader,
   });
@@ -19607,7 +19654,6 @@ main().catch((error) => {
     core.setFailed(error);
   }
 });
-
 })();
 
 module.exports = __webpack_exports__;

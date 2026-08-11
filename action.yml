@@ -1,34 +1,53 @@
 name: 'LeetCode Sync'
 description: 'Sync LeetCode submissions to GitHub'
+
 branding:
   icon: git-commit
   color: yellow
+
 inputs:
   github-token:
     description: 'The GitHub token'
     required: true
+
   leetcode-csrf-token:
     description: 'The LeetCode CSRF token'
     required: true
+
   leetcode-session:
     description: 'The LeetCode session value'
     required: true
+
   filter-duplicate-secs:
     description: 'Number of seconds after an accepted solution to ignore other accepted solutions for the same problem'
     required: false
     default: '86400'
+
   destination-folder:
     description: 'The folder to save the synced files in (relative to the top level of your repo)'
     required: false
     default: '.'
+
   verbose:
     description: 'Adds submission percentiles and question numbers to the repo (requires an additional API call)'
     required: false
     default: 'true'
+
   commit-header:
     description: 'How the automated commits should be prefixed'
     required: false
     default: 'Sync LeetCode submission'
+
+  sync-from:
+    description: 'Sync accepted submissions after this date. Example: 2020-01-01'
+    required: false
+    default: ''
+
+  language:
+    description: 'Only sync submissions written in this LeetCode language. Example: mysql'
+    required: false
+    default: ''
+
 runs:
   using: 'node20'
   main: 'dist/index.js'
