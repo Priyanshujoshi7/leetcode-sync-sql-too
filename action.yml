@@ -1,5 +1,5 @@
 name: 'LeetCode Sync'
-description: 'Sync LeetCode submissions to GitHub'
+description: 'Syncs LeetCode submissions to GitHub'
 
 branding:
   icon: git-commit
