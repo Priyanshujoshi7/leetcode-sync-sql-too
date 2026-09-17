@@ -63,6 +63,7 @@ function graphqlHeaders(session, csrfToken) {
   };
 }
 
+
 async function getInfo(submission, session, csrfToken) {
   let data = JSON.stringify({
     query: `query submissionDetails($submissionId: Int!) {
@@ -80,23 +81,26 @@ async function getInfo(submission, session, csrfToken) {
 
   const headers = graphqlHeaders(session, csrfToken);
 
-  // No need to break on first request error since that would be done when getting submissions
   const getInfo = async (maxRetries = 5, retryCount = 0) => {
     try {
-      const response = await axios.post("https://leetcode.com/graphql/", data, {
-        headers,
-      });
-      const submissionDetails = response.data?.data?.submissionDetails;
+      const response = await axios.post(
+        "https://leetcode.com/graphql/",
+        data,
+        { headers }
+      );
+
+      const submissionDetails =
+        response.data?.data?.submissionDetails;
 
       const runtimePercentile =
-        submissionDetails.runtimePercentile !== null &&
-        submissionDetails.runtimePercentile !== undefined
+        submissionDetails?.runtimePercentile !== null &&
+        submissionDetails?.runtimePercentile !== undefined
           ? `${submissionDetails.runtimePercentile.toFixed(2)}%`
           : "N/A";
 
       const memoryPercentile =
-        submissionDetails.memoryPercentile !== null &&
-        submissionDetails.memoryPercentile !== undefined
+        submissionDetails?.memoryPercentile !== null &&
+        submissionDetails?.memoryPercentile !== undefined
           ? `${submissionDetails.memoryPercentile.toFixed(2)}%`
           : "N/A";
 
@@ -105,33 +109,39 @@ async function getInfo(submission, session, csrfToken) {
         : "N/A";
 
       log(`Got info for submission #${submission.id}`);
+
       return {
+        ...submission,
         runtimePerc: runtimePercentile,
         memoryPerc: memoryPercentile,
         qid: questionId,
-        code: response.data.data.submissionDetails.code,
+        code: submissionDetails?.code,
       };
     } catch (exception) {
       if (retryCount >= maxRetries) {
-        // If problem is locked due to user not having LeetCode Premium
-        if (exception.response && exception.response.status === 403) {
+        if (
+          exception.response &&
+          exception.response.status === 403
+        ) {
           log(`Skipping locked problem: ${submission.title}`);
           return null;
         }
         throw exception;
       }
+
       log(
         "Error fetching submission info, retrying in " +
           3 ** retryCount +
           " seconds..."
       );
+
       await delay(3 ** retryCount * 1000);
       return getInfo(maxRetries, retryCount + 1);
     }
   };
 
   const info = await getInfo();
-  return { ...submission, ...info };
+  return info;
 }
 
 async function commit(params) {
@@ -272,7 +282,30 @@ function addToSubmissions(params) {
     language,
   } = params;
 
-  for (const submission of response.data.data.submissionList.submissions) {
+  // Log GraphQL-level errors even when HTTP request succeeded.
+  if (response.data?.errors) {
+    throw new Error(
+      `LeetCode GraphQL error: ${JSON.stringify(response.data.errors)}`
+    );
+  }
+
+  const submissionList = response.data?.data?.submissionList;
+
+  if (!submissionList) {
+    throw new Error(
+      `LeetCode did not return submissionList: ${JSON.stringify(response.data)}`
+    );
+  }
+
+  if (!Array.isArray(submissionList.submissions)) {
+    throw new Error(
+      `LeetCode returned an unexpected submissions value: ${JSON.stringify(
+        submissionList
+      )}`
+    );
+  }
+
+  for (const submission of submissionList.submissions) {
     const submissionTimestamp = Number(submission.timestamp);
 
     if (submissionTimestamp <= lastTimestamp) {
@@ -283,8 +316,6 @@ function addToSubmissions(params) {
       continue;
     }
 
-    // If a language filter was provided, only keep submissions
-    // written in that language.
     if (language && submission.lang !== language) {
       continue;
     }
@@ -296,8 +327,6 @@ function addToSubmissions(params) {
       submissions_dict[name] = {};
     }
 
-    // Filter out other accepted solutions less than one day
-    // from the most recent one.
     if (
       submissions_dict[name][lang] &&
       submissions_dict[name][lang] - submissionTimestamp < filterDuplicateSecs
