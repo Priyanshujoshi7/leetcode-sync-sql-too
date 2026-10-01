@@ -3,6 +3,7 @@ const { Octokit } = require("@octokit/rest");
 const path = require("path");
 
 const COMMIT_MESSAGE = "Sync LeetCode submission";
+
 const LANG_TO_EXTENSION = {
   bash: "sh",
   c: "c",
@@ -30,6 +31,7 @@ const LANG_TO_EXTENSION = {
   swift: "swift",
   typescript: "ts",
 };
+
 const BASE_URL = "https://leetcode.com";
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -42,6 +44,7 @@ function pad(n) {
   if (n.length > 4) {
     return n;
   }
+
   var s = "000" + n;
   return s.substring(s.length - 4);
 }
@@ -63,9 +66,8 @@ function graphqlHeaders(session, csrfToken) {
   };
 }
 
-
 async function getInfo(submission, session, csrfToken) {
-  let data = JSON.stringify({
+  const data = JSON.stringify({
     query: `query submissionDetails($submissionId: Int!) {
       submissionDetails(submissionId: $submissionId) {
         runtimePercentile
@@ -76,7 +78,9 @@ async function getInfo(submission, session, csrfToken) {
         }
       }
     }`,
-    variables: { submissionId: submission.id },
+    variables: {
+      submissionId: submission.id,
+    },
   });
 
   const headers = graphqlHeaders(session, csrfToken);
@@ -89,22 +93,36 @@ async function getInfo(submission, session, csrfToken) {
         { headers }
       );
 
+      if (response.data?.errors?.length) {
+        throw new Error(
+          `LeetCode GraphQL error fetching submission #${submission.id}: ` +
+            JSON.stringify(response.data.errors)
+        );
+      }
+
       const submissionDetails =
         response.data?.data?.submissionDetails;
 
+      if (!submissionDetails) {
+        throw new Error(
+          `LeetCode returned no submissionDetails for #${submission.id}: ` +
+            JSON.stringify(response.data)
+        );
+      }
+
       const runtimePercentile =
-        submissionDetails?.runtimePercentile !== null &&
-        submissionDetails?.runtimePercentile !== undefined
+        submissionDetails.runtimePercentile !== null &&
+        submissionDetails.runtimePercentile !== undefined
           ? `${submissionDetails.runtimePercentile.toFixed(2)}%`
           : "N/A";
 
       const memoryPercentile =
-        submissionDetails?.memoryPercentile !== null &&
-        submissionDetails?.memoryPercentile !== undefined
+        submissionDetails.memoryPercentile !== null &&
+        submissionDetails.memoryPercentile !== undefined
           ? `${submissionDetails.memoryPercentile.toFixed(2)}%`
           : "N/A";
 
-      const questionId = submissionDetails?.question?.questionId
+      const questionId = submissionDetails.question?.questionId
         ? pad(submissionDetails.question.questionId.toString())
         : "N/A";
 
@@ -115,7 +133,7 @@ async function getInfo(submission, session, csrfToken) {
         runtimePerc: runtimePercentile,
         memoryPerc: memoryPercentile,
         qid: questionId,
-        code: submissionDetails?.code,
+        code: submissionDetails.code,
       };
     } catch (exception) {
       if (retryCount >= maxRetries) {
@@ -126,6 +144,7 @@ async function getInfo(submission, session, csrfToken) {
           log(`Skipping locked problem: ${submission.title}`);
           return null;
         }
+
         throw exception;
       }
 
@@ -136,11 +155,13 @@ async function getInfo(submission, session, csrfToken) {
       );
 
       await delay(3 ** retryCount * 1000);
+
       return getInfo(maxRetries, retryCount + 1);
     }
   };
 
   const info = await getInfo();
+
   return info;
 }
 
@@ -160,6 +181,7 @@ async function commit(params) {
   } = params;
 
   const name = normalizeName(submission.title);
+
   log(`Committing solution for ${name}...`);
 
   if (!LANG_TO_EXTENSION[submission.lang]) {
@@ -179,24 +201,36 @@ async function commit(params) {
     message = `${commitName} - ${submission.title} - Runtime - ${submission.runtime}, Memory - ${submission.memory}`;
     qid = "";
   }
+
   const folderName = `${qid}${name}`;
+
   // Markdown file for the problem with question data
-  const questionPath = path.join(prefix, folderName, "README.md");
+  const questionPath = path.join(
+    prefix,
+    folderName,
+    "README.md"
+  );
 
   // Separate file for the solution
   const solutionFileName = `solution.${LANG_TO_EXTENSION[submission.lang]}`;
-  const solutionPath = path.join(prefix, folderName, solutionFileName);
+
+  const solutionPath = path.join(
+    prefix,
+    folderName,
+    solutionFileName
+  );
 
   const treeData = [
     {
       path: path.normalize(questionPath),
       mode: "100644",
-      content: questionData ?? "Unable to fetch the Problem statement.",
+      content:
+        questionData ?? "Unable to fetch the Problem statement.",
     },
     {
       path: path.normalize(solutionPath),
       mode: "100644",
-      content: `${submission.code}\n`, // Adds newline at EOF to conform to git recommendations
+      content: `${submission.code}\n`,
     },
   ];
 
@@ -207,7 +241,10 @@ async function commit(params) {
     tree: treeData,
   });
 
-  const date = new Date(Number(submission.timestamp) * 1000).toISOString();
+  const date = new Date(
+    Number(submission.timestamp) * 1000
+  ).toISOString();
+
   const commitResponse = await octokit.git.createCommit({
     owner: owner,
     repo: repo,
@@ -236,20 +273,33 @@ async function commit(params) {
 
   log(`Committed solution for ${name}`);
 
-  return [treeResponse.data.sha, commitResponse.data.sha];
+  return [
+    treeResponse.data.sha,
+    commitResponse.data.sha,
+  ];
 }
 
-async function getQuestionData(titleSlug, leetcodeSession, csrfToken) {
+async function getQuestionData(
+  titleSlug,
+  leetcodeSession,
+  csrfToken
+) {
   log(`Getting question data for ${titleSlug}...`);
 
-  const headers = graphqlHeaders(leetcodeSession, csrfToken);
+  const headers = graphqlHeaders(
+    leetcodeSession,
+    csrfToken
+  );
+
   const graphql = JSON.stringify({
     query: `query getQuestionDetail($titleSlug: String!) {
       question(titleSlug: $titleSlug) {
         content
       }
     }`,
-    variables: { titleSlug: titleSlug },
+    variables: {
+      titleSlug: titleSlug,
+    },
   });
 
   try {
@@ -258,35 +308,39 @@ async function getQuestionData(titleSlug, leetcodeSession, csrfToken) {
       graphql,
       { headers }
     );
+
     if (response.data?.errors?.length) {
       throw new Error(
-        `LeetCode GraphQL error fetching submission #${submission.id}: ` +
-        JSON.stringify(response.data.errors)
+        `LeetCode GraphQL error fetching question ${titleSlug}: ` +
+          JSON.stringify(response.data.errors)
       );
     }
-    
-    const submissionDetails = response.data?.data?.submissionDetails;
-    
-    if (!submissionDetails) {
+
+    const question = response.data?.data?.question;
+
+    if (!question) {
       throw new Error(
-        `LeetCode returned no submissionDetails for #${submission.id}: ` +
-        JSON.stringify(response.data)
+        `LeetCode returned no question data for ${titleSlug}: ` +
+          JSON.stringify(response.data)
       );
     }
-    const result = await response.data;
-    return result.data.question.content;
+
+    return question.content;
   } catch (error) {
     // If problem is locked due to user not having LeetCode Premium
-    if (error.response && error.response.status === 403) {
+    if (
+      error.response &&
+      error.response.status === 403
+    ) {
       log(`Skipping locked problem: ${titleSlug}`);
       return null;
     }
+
     console.log("error", error);
   }
 }
 
 // Returns false if no more submissions should be added.
-
 function addToSubmissions(params) {
   const {
     response,
@@ -301,15 +355,20 @@ function addToSubmissions(params) {
 
   if (body?.errors?.length) {
     throw new Error(
-      `LeetCode GraphQL error: ${JSON.stringify(body.errors)}`
+      `LeetCode GraphQL error: ${JSON.stringify(
+        body.errors
+      )}`
     );
   }
 
-  const submissionList = body?.data?.submissionList;
+  const submissionList =
+    body?.data?.submissionList;
 
   if (!submissionList) {
     throw new Error(
-      `LeetCode did not return submissionList: ${JSON.stringify(body)}`
+      `LeetCode did not return submissionList: ${JSON.stringify(
+        body
+      )}`
     );
   }
 
@@ -322,7 +381,9 @@ function addToSubmissions(params) {
   }
 
   for (const submission of submissionList.submissions) {
-    const submissionTimestamp = Number(submission.timestamp);
+    const submissionTimestamp = Number(
+      submission.timestamp
+    );
 
     if (submissionTimestamp <= lastTimestamp) {
       return false;
@@ -345,13 +406,16 @@ function addToSubmissions(params) {
 
     if (
       submissions_dict[name][lang] &&
-      submissions_dict[name][lang] - submissionTimestamp <
+      submissions_dict[name][lang] -
+        submissionTimestamp <
         filterDuplicateSecs
     ) {
       continue;
     }
 
-    submissions_dict[name][lang] = submissionTimestamp;
+    submissions_dict[name][lang] =
+      submissionTimestamp;
+
     submissions.push(submission);
   }
 
@@ -375,8 +439,10 @@ async function sync(inputs) {
 
   const octokit = new Octokit({
     auth: githubToken,
-    userAgent: "LeetCode sync to GitHub - GitHub Action",
+    userAgent:
+      "LeetCode sync to GitHub - GitHub Action",
   });
+
   if (syncFrom) {
     log(`Historical sync enabled from: ${syncFrom}`);
   }
@@ -384,6 +450,7 @@ async function sync(inputs) {
   if (language) {
     log(`Language filter enabled: ${language}`);
   }
+
   // First, get the time the timestamp for when the syncer last ran.
   const commits = await octokit.repos.listCommits({
     owner: owner,
@@ -394,17 +461,21 @@ async function sync(inputs) {
   let lastTimestamp = 0;
 
   if (syncFrom) {
-    lastTimestamp = Math.floor(new Date(syncFrom).getTime() / 1000);
+    lastTimestamp = Math.floor(
+      new Date(syncFrom).getTime() / 1000
+    );
   }
-  // commitInfo is used to get the original name / email to use for the author / committer.
-  // Since we need to modify the commit time, we can't use the default settings for the
-  // authenticated user.
+
+  // commitInfo is used to get the original name / email
+  // to use for the author / committer.
   let commitInfo;
 
   for (const commit of commits.data) {
     if (
       !commit.commit.message.startsWith(
-        !!commitHeader ? commitHeader : COMMIT_MESSAGE
+        !!commitHeader
+          ? commitHeader
+          : COMMIT_MESSAGE
       )
     ) {
       continue;
@@ -413,26 +484,42 @@ async function sync(inputs) {
     commitInfo = commit.commit.author;
 
     if (!syncFrom) {
-      lastTimestamp = Date.parse(commit.commit.committer.date) / 1000;
+      lastTimestamp =
+        Date.parse(
+          commit.commit.committer.date
+        ) / 1000;
     }
 
     break;
   }
 
-  // Get all Accepted submissions from LeetCode greater than the timestamp.
+  // Get all Accepted submissions from LeetCode
+  // greater than the timestamp.
   let response = null;
   let offset = 0;
+
   const submissions = [];
   const submissions_dict = {};
-  do {
-    log(`Getting submission from LeetCode, offset ${offset}`);
 
-    const getSubmissions = async (maxRetries, retryCount = 0) => {
+  do {
+    log(
+      `Getting submission from LeetCode, offset ${offset}`
+    );
+
+    const getSubmissions = async (
+      maxRetries,
+      retryCount = 0
+    ) => {
       try {
         const slug = undefined;
+
         const graphql = JSON.stringify({
           query: `query ($offset: Int!, $limit: Int!, $slug: String) {
-              submissionList(offset: $offset, limit: $limit, questionSlug: $slug) {
+              submissionList(
+                offset: $offset,
+                limit: $limit,
+                questionSlug: $slug
+              ) {
                   hasNext
                   submissions {
                       id
@@ -453,60 +540,100 @@ async function sync(inputs) {
           },
         });
 
-        const headers = graphqlHeaders(leetcodeSession, leetcodeCSRFToken);
+        const headers = graphqlHeaders(
+          leetcodeSession,
+          leetcodeCSRFToken
+        );
+
         const response = await axios.post(
           "https://leetcode.com/graphql/",
           graphql,
           { headers }
         );
-        
-        log(`LeetCode response: ${JSON.stringify(response.data)}`);
-        
+
+        // Diagnostic logging.
+        // This is safe because response.data does not
+        // contain the session/CSRF headers.
+        log(
+          `LeetCode response: ${JSON.stringify(
+            response.data
+          )}`
+        );
+
         if (response.data?.errors?.length) {
           throw new Error(
-            `LeetCode GraphQL error: ${JSON.stringify(response.data.errors)}`
+            `LeetCode GraphQL error: ${JSON.stringify(
+              response.data.errors
+            )}`
           );
         }
-        
-        const submissionList = response.data?.data?.submissionList;
-        
+
+        const submissionList =
+          response.data?.data?.submissionList;
+
         if (!submissionList) {
           throw new Error(
-            `LeetCode did not return submissionList: ${JSON.stringify(response.data)}`
+            `LeetCode did not return submissionList: ${JSON.stringify(
+              response.data
+            )}`
           );
         }
-        
-        if (!Array.isArray(submissionList.submissions)) {
+
+        if (
+          !Array.isArray(
+            submissionList.submissions
+          )
+        ) {
           throw new Error(
-            `LeetCode returned invalid submissions: ${JSON.stringify(submissionList)}`
+            `LeetCode returned invalid submissions: ${JSON.stringify(
+              submissionList
+            )}`
           );
         }
-        
-        log(`Successfully fetched submission from LeetCode, offset ${offset}`);
-        
+
+        log(
+          `Successfully fetched submission from LeetCode, offset ${offset}`
+        );
+
         return response;
       } catch (exception) {
         if (retryCount >= maxRetries) {
           throw exception;
         }
+
         log(
           "Error fetching submissions, retrying in " +
             3 ** retryCount +
             " seconds..."
         );
-        // There's a rate limit on LeetCode API, so wait with backoff before retrying.
-        await delay(3 ** retryCount * 1000);
-        return getSubmissions(maxRetries, retryCount + 1);
+
+        // There's a rate limit on LeetCode API,
+        // so wait with backoff before retrying.
+        await delay(
+          3 ** retryCount * 1000
+        );
+
+        return getSubmissions(
+          maxRetries,
+          retryCount + 1
+        );
       }
     };
-    // On the first attempt, there should be no rate limiting issues, so we fail immediately in case
-    // the tokens are configured incorrectly.
-    const maxRetries = response === null ? 0 : 5;
+
+    // On the first attempt, there should be no rate
+    // limiting issues, so fail immediately if tokens
+    // are configured incorrectly.
+    const maxRetries =
+      response === null ? 0 : 5;
+
     if (response !== null) {
-      // Add a 1 second delay before all requests after the initial request.
+      // Add a 1 second delay before all requests
+      // after the initial request.
       await delay(1000);
     }
+
     response = await getSubmissions(maxRetries);
+
     if (
       !addToSubmissions({
         response,
@@ -521,22 +648,41 @@ async function sync(inputs) {
     }
 
     offset += 20;
-  } while (response.data.data.submissionList.hasNext);
+  } while (
+    response.data.data.submissionList.hasNext
+  );
 
-  // We have all submissions we want to write to GitHub now.
+  // We have all submissions we want to write
+  // to GitHub now.
+
   // First, get the default branch to write to.
   const repoInfo = await octokit.repos.get({
     owner: owner,
     repo: repo,
   });
-  const defaultBranch = repoInfo.data.default_branch;
-  log(`Default branch for ${owner}/${repo}: ${defaultBranch}`);
-  // Write in reverse order (oldest first), so that if there's errors, the last sync time
-  // is still valid.
-  log(`Syncing ${submissions.length} submissions...`);
+
+  const defaultBranch =
+    repoInfo.data.default_branch;
+
+  log(
+    `Default branch for ${owner}/${repo}: ${defaultBranch}`
+  );
+
+  // Write in reverse order (oldest first), so that
+  // if there are errors, the last sync time is still valid.
+  log(
+    `Syncing ${submissions.length} submissions...`
+  );
+
   let latestCommitSHA = commits.data[0].sha;
-  let treeSHA = commits.data[0].commit.tree.sha;
-  for (let i = submissions.length - 1; i >= 0; i--) {
+  let treeSHA =
+    commits.data[0].commit.tree.sha;
+
+  for (
+    let i = submissions.length - 1;
+    i >= 0;
+    i--
+  ) {
     const submission = await getInfo(
       submissions[i],
       leetcodeSession,
@@ -544,34 +690,41 @@ async function sync(inputs) {
     );
 
     if (submission === null) {
-      // Skip this submission if it is null (locked problem)
+      // Skip this submission if it is null
+      // (locked problem).
       continue;
     }
 
     // Get the question data for the submission.
-    const questionData = await getQuestionData(
-      submission.titleSlug,
-      leetcodeSession,
-      leetcodeCSRFToken
-    );
+    const questionData =
+      await getQuestionData(
+        submission.titleSlug,
+        leetcodeSession,
+        leetcodeCSRFToken
+      );
+
     if (questionData === null) {
-      // Skip this submission if question data is null (locked problem)
+      // Skip this submission if question data is null
+      // (locked problem).
       continue;
     }
-    [treeSHA, latestCommitSHA] = await commit({
-      octokit,
-      owner,
-      repo,
-      defaultBranch,
-      commitInfo,
-      treeSHA,
-      latestCommitSHA,
-      submission,
-      destinationFolder,
-      commitHeader,
-      questionData,
-    });
+
+    [treeSHA, latestCommitSHA] =
+      await commit({
+        octokit,
+        owner,
+        repo,
+        defaultBranch,
+        commitInfo,
+        treeSHA,
+        latestCommitSHA,
+        submission,
+        destinationFolder,
+        commitHeader,
+        questionData,
+      });
   }
+
   log("Done syncing all submissions.");
 }
 
