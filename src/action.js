@@ -258,6 +258,21 @@ async function getQuestionData(titleSlug, leetcodeSession, csrfToken) {
       graphql,
       { headers }
     );
+    if (response.data?.errors?.length) {
+      throw new Error(
+        `LeetCode GraphQL error fetching submission #${submission.id}: ` +
+        JSON.stringify(response.data.errors)
+      );
+    }
+    
+    const submissionDetails = response.data?.data?.submissionDetails;
+    
+    if (!submissionDetails) {
+      throw new Error(
+        `LeetCode returned no submissionDetails for #${submission.id}: ` +
+        JSON.stringify(response.data)
+      );
+    }
     const result = await response.data;
     return result.data.question.content;
   } catch (error) {
