@@ -282,24 +282,25 @@ function addToSubmissions(params) {
     language,
   } = params;
 
-  // Log GraphQL-level errors even when HTTP request succeeded.
-  if (response.data?.errors) {
+  const body = response.data;
+
+  if (body?.errors?.length) {
     throw new Error(
-      `LeetCode GraphQL error: ${JSON.stringify(response.data.errors)}`
+      `LeetCode GraphQL error: ${JSON.stringify(body.errors)}`
     );
   }
 
-  const submissionList = response.data?.data?.submissionList;
+  const submissionList = body?.data?.submissionList;
 
   if (!submissionList) {
     throw new Error(
-      `LeetCode did not return submissionList: ${JSON.stringify(response.data)}`
+      `LeetCode did not return submissionList: ${JSON.stringify(body)}`
     );
   }
 
   if (!Array.isArray(submissionList.submissions)) {
     throw new Error(
-      `LeetCode returned an unexpected submissions value: ${JSON.stringify(
+      `LeetCode returned invalid submissions: ${JSON.stringify(
         submissionList
       )}`
     );
@@ -329,7 +330,8 @@ function addToSubmissions(params) {
 
     if (
       submissions_dict[name][lang] &&
-      submissions_dict[name][lang] - submissionTimestamp < filterDuplicateSecs
+      submissions_dict[name][lang] - submissionTimestamp <
+        filterDuplicateSecs
     ) {
       continue;
     }
@@ -442,7 +444,31 @@ async function sync(inputs) {
           graphql,
           { headers }
         );
+        
+        log(`LeetCode response: ${JSON.stringify(response.data)}`);
+        
+        if (response.data?.errors?.length) {
+          throw new Error(
+            `LeetCode GraphQL error: ${JSON.stringify(response.data.errors)}`
+          );
+        }
+        
+        const submissionList = response.data?.data?.submissionList;
+        
+        if (!submissionList) {
+          throw new Error(
+            `LeetCode did not return submissionList: ${JSON.stringify(response.data)}`
+          );
+        }
+        
+        if (!Array.isArray(submissionList.submissions)) {
+          throw new Error(
+            `LeetCode returned invalid submissions: ${JSON.stringify(submissionList)}`
+          );
+        }
+        
         log(`Successfully fetched submission from LeetCode, offset ${offset}`);
+        
         return response;
       } catch (exception) {
         if (retryCount >= maxRetries) {
